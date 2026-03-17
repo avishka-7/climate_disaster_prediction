@@ -11,45 +11,43 @@ import plotly.express as px
 model = joblib.load("xgboost_model.pkl")
 features = joblib.load("model_features.pkl")
 
-# =========================
-# API KEY
-# =========================
 API_KEY = "92c2e0509859c54d808577aac9ae09ea"
 
 # =========================
-# GET WEATHER DATA
+# WEATHER DATA FUNCTION
 # =========================
 def get_weather(city):
 
     url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
 
-    response = requests.get(url)
-    
-    if response.status_code != 200:
+    try:
+        response = requests.get(url)
+        data = response.json()
+
+        if response.status_code != 200:
+            st.error(f"API Error: {data.get('message')}")
+            return None, None, None
+
+        weather = {
+            "max_temperature": data["main"]["temp_max"],
+            "min_temperature": data["main"]["temp_min"],
+            "max_humidity": data["main"]["humidity"],
+            "min_humidity": max(data["main"]["humidity"] - 10, 0),
+            "wind_speed": data["wind"]["speed"] * 3.6,
+            "pressure_surface_level": data["main"]["pressure"],
+            "cloud_cover": data["clouds"]["all"],
+            "visibility": data.get("visibility", 10000) / 1000,
+            "uv_index": 7,
+            "solar_radiation": 500,
+            "latitude": data["coord"]["lat"],
+            "longitude": data["coord"]["lon"]
+        }
+
+        return weather, weather["latitude"], weather["longitude"]
+
+    except:
+        st.error("Error fetching weather data")
         return None, None, None
-
-    data = response.json()
-
-    weather = {
-        "max_temperature": data["main"]["temp_max"],
-        "min_temperature": data["main"]["temp_min"],
-        "max_humidity": data["main"]["humidity"],
-        "min_humidity": max(data["main"]["humidity"] - 10, 0),
-        "wind_speed": data["wind"]["speed"] * 3.6,
-        "pressure_surface_level": data["main"]["pressure"],
-        "cloud_cover": data["clouds"]["all"],
-        "visibility": data.get("visibility", 10000) / 1000,
-        "uv_index": 7,  # approximation
-        "solar_radiation": 500  # approximation
-    }
-
-    lat = data["coord"]["lat"]
-    lon = data["coord"]["lon"]
-
-    weather["latitude"] = lat
-    weather["longitude"] = lon
-
-    return weather, lat, lon
 
 
 # =========================
@@ -103,11 +101,11 @@ with tabs[0]:
 
     st.header("Heatwave Prediction")
 
-    city = st.text_input("Enter City Name")
+    city = st.text_input("Enter City Name").strip().title()
 
     if st.button("Predict"):
 
-        with st.spinner("Fetching data & predicting..."):
+        with st.spinner("Analyzing climate data..."):
 
             pred, prob, level, weather, lat, lon = predict_heatwave(city)
 
@@ -118,28 +116,57 @@ with tabs[0]:
 
             col1, col2 = st.columns(2)
 
+            # LEFT SIDE
             with col1:
                 st.subheader("Result")
-                st.write("City:", city)
-                st.write("Prediction:", pred)
-                st.write("Heatwave Probability:", round(prob,2), "%")
-                st.write("Risk Level:", level)
 
+                st.write("📍 City:", city)
+                st.write("🌡️ Prediction:", pred)
+                st.write("📊 Heatwave Probability:", round(prob,2), "%")
+                st.write("⚠️ Risk Level:", level)
+
+                st.write(f"🌍 Coordinates: ({lat}, {lon})")
+
+                # 🔥 Risk Alerts
+                if prob > 60:
+                    st.error("⚠️ High Heatwave Risk! Stay Alert")
+                elif prob > 40:
+                    st.warning("Moderate Risk Conditions")
+                else:
+                    st.success("Conditions are safe")
+
+                # 🌡️ Temperature Insight
+                if weather["max_temperature"] > 38:
+                    st.warning("High temperature contributing to heatwave risk")
+
+            # RIGHT SIDE
             with col2:
                 st.subheader("Weather Data")
                 st.json(weather)
 
-            # Probability chart
+            # =========================
+            # PROBABILITY GRAPH
+            # =========================
             prob_df = pd.DataFrame({
                 "Class": ["No Heatwave", "Heatwave"],
                 "Probability": [100-prob, prob]
             })
 
-            st.subheader("Probability Breakdown")
-            st.bar_chart(prob_df.set_index("Class"))
+            fig = px.bar(
+                prob_df,
+                x="Class",
+                y="Probability",
+                color="Class",
+                title="Heatwave Probability Breakdown"
+            )
 
-            # Feature importance
+            st.plotly_chart(fig)
+
+            # =========================
+            # FEATURE IMPORTANCE
+            # =========================
             st.subheader("Model Explanation")
+
             importance = model.feature_importances_
 
             importance_df = pd.DataFrame({
@@ -147,7 +174,18 @@ with tabs[0]:
                 "Importance": importance
             }).sort_values(by="Importance", ascending=False)
 
-            st.bar_chart(importance_df.set_index("Feature"))
+            # Clean names
+            importance_df["Feature"] = importance_df["Feature"].str.replace("_", " ").str.title()
+
+            fig2 = px.bar(
+                importance_df,
+                x="Importance",
+                y="Feature",
+                orientation='h',
+                title="Feature Importance"
+            )
+
+            st.plotly_chart(fig2)
 
 
 # =========================
@@ -157,7 +195,7 @@ with tabs[1]:
 
     st.header("Geospatial Heatwave Risk Map")
 
-    city_map = st.text_input("Enter City")
+    city_map = st.text_input("Enter City").strip().title()
 
     if st.button("Show Map"):
 
@@ -180,7 +218,8 @@ with tabs[1]:
                 size="risk",
                 color="risk",
                 zoom=4,
-                mapbox_style="open-street-map"
+                mapbox_style="open-street-map",
+                title="Heatwave Risk Map"
             )
 
             st.plotly_chart(fig)
@@ -206,17 +245,26 @@ with tabs[2]:
         with st.spinner("Analyzing cities..."):
 
             for city in cities:
-                pred, prob, level, weather, lat, lon = predict_heatwave(city)
+                try:
+                    pred, prob, level, weather, lat, lon = predict_heatwave(city)
 
-                if pred is not None:
-                    results.append({
-                        "City": city,
-                        "Prediction": pred,
-                        "Risk (%)": round(prob,2),
-                        "Level": level
-                    })
+                    if pred is not None:
+                        results.append({
+                            "City": city,
+                            "Prediction": pred,
+                            "Risk (%)": round(prob,2),
+                            "Level": level
+                        })
+                except:
+                    continue
 
-        df_monitor = pd.DataFrame(results)
-        df_monitor = df_monitor.sort_values(by="Risk (%)", ascending=False)
+        if len(results) > 0:
+            df_monitor = pd.DataFrame(results)
 
-        st.dataframe(df_monitor)
+            if "Risk (%)" in df_monitor.columns:
+                df_monitor = df_monitor.sort_values(by="Risk (%)", ascending=False)
+
+            st.dataframe(df_monitor)
+
+        else:
+            st.warning("No data available.")

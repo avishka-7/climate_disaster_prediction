@@ -14,7 +14,7 @@ features = joblib.load("model_features.pkl")
 # =========================
 # API KEY
 # =========================
-API_KEY = ""92c2e0509859c54d808577aac9ae09ea""
+API_KEY = "92c2e0509859c54d808577aac9ae09ea"
 
 # =========================
 # GET WEATHER DATA
